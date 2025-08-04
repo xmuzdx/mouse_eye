@@ -1,0 +1,11 @@
+opencv-python-headless
+numpy
+torch
+torchvision
+pandas
+matplotlib
+ultralytics
+segmentation-models-pytorch
+streamlit
+scikit-image
+timm
