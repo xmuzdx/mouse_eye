@@ -9,3 +9,5 @@ segmentation-models-pytorch
 streamlit
 scikit-image
 timm
+gspread==5.12.4
+google-auth-oauthlib==1.2.0
