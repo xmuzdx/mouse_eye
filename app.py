@@ -83,8 +83,7 @@ def send_data_to_google_sheet(stats):
     except Exception as e:
         return False, f"Failed to send data: {e}"
 
-# --- AI模型和图像处理辅助函数 (保持不变) ---
-# ... (此处省略 load_detection_model, load_segmentation_model, preprocess_for_segmentation, etc.)
+
 @st.cache_resource
 def load_detection_model(path):
     if not os.path.exists(path): st.error(f"YOLOv8 model file not found: {path}"); return None
@@ -110,7 +109,7 @@ def postprocess_segmentation(output_mask, original_crop_shape, seg_threshold):
 def calculate_laplacian_variance(image): return cv2.Laplacian(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var()
 
 # --- 主分析逻辑 (保持不变) ---
-# ... (此处省略 run_analysis 函数)
+
 def run_analysis(video_path, yolo_model, seg_model, config):
     # ... (与之前版本完全相同，此处省略以保持简洁)
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -119,13 +118,24 @@ def run_analysis(video_path, yolo_model, seg_model, config):
         if not cap.isOpened(): st.error("Error: Could not open the uploaded video file."); return None, None, None, None
         frame_width, frame_height, fps, total_frames = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)), cap.get(cv2.CAP_PROP_FPS), int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         out_video = cv2.VideoWriter(output_video_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (frame_width, frame_height))
-        results_data, max_observed_area, blink_count, in_blink_phase, previous_area = [], 0, 0, False, -1
+        
+        # <<< MODIFIED: 初始化新的状态变量 >>>
+        results_data = []
+        max_observed_area = 0
+        blink_count = 0
+        previous_area = -1
+        blink_state = 'OPEN'  # 新的状态机: 'OPEN', 'CLOSING', 'OPENING'
+        
         progress_bar = st.progress(0, text="Analyzing video...")
         for frame_count in range(total_frames):
             ret, frame = cap.read()
             if not ret: break
             timestamp = (frame_count + 1) / fps; display_frame = frame.copy()
             is_blurry = calculate_laplacian_variance(frame) < config['LAPLACIAN_VAR_THRESHOLD']
+            
+            # <<< MODIFIED: 定义一个布尔值用于日志和显示，它将从我们的新状态机派生 >>>
+            in_blink_phase = (blink_state != 'OPEN')
+
             if is_blurry: results_data.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': -1, 'is_blinking': None, 'status': 'blurry'})
             else:
                 yolo_results = yolo_model.predict(frame, conf=config['YOLO_CONF_THRESHOLD'], classes=[0], verbose=False)
@@ -137,22 +147,51 @@ def run_analysis(video_path, yolo_model, seg_model, config):
                         input_tensor = preprocess_for_segmentation(eye_crop)
                         with torch.no_grad(): seg_output = seg_model(input_tensor)
                         binary_mask, current_area = postprocess_segmentation(seg_output, eye_crop.shape[:2], config['SEG_THRESHOLD'])
+                        
                         if current_area > config['MIN_OPEN_AREA_FOR_REF']: max_observed_area = max(max_observed_area, current_area)
+                        
+                        
                         if previous_area != -1 and max_observed_area > config['MIN_OPEN_AREA_FOR_REF']:
                             area_drop = previous_area - current_area
-                            if not in_blink_phase and area_drop > config['BLINK_DROP_THRESHOLD']: blink_count += 1; in_blink_phase = True
-                            elif in_blink_phase and current_area > (max_observed_area * config['REOPEN_RATIO_THRESHOLD']): in_blink_phase = False
+                            area_rise = current_area - previous_area 
+
+                            if blink_state == 'OPEN':
+                               
+                                if area_drop > config['BLINK_DROP_THRESHOLD']:
+                                    blink_state = 'CLOSING'
+                            
+                            elif blink_state == 'CLOSING':
+                           
+                                if area_rise > 0:
+                                    blink_count += 1
+                                    blink_state = 'OPENING'
+
+                            elif blink_state == 'OPENING':
+                               
+                                if current_area > (max_observed_area * config['REOPEN_RATIO_THRESHOLD']):
+                                    blink_state = 'OPEN'
+                        
+                      
                         previous_area = current_area
+
+                       
+                        in_blink_phase = (blink_state != 'OPEN')
+
                         if current_area > 0:
                             colored_mask = cv2.cvtColor(binary_mask, cv2.COLOR_GRAY2BGR); colored_mask[binary_mask == 255] = (255, 0, 255)
                             display_frame[y1:y2, x1:x2] = cv2.addWeighted(eye_crop, 0.7, colored_mask, 0.3, 0)
+                        
                         results_data.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': current_area, 'is_blinking': in_blink_phase, 'status': 'processed'})
                         cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                     else: results_data.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': -1, 'is_blinking': None, 'status': 'processed_no_crop'})
                 else: results_data.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': -1, 'is_blinking': None, 'status': 'no_eye'})
-                status_text = f"Frame: {frame_count+1} Area: {int(current_area)} Blink Phase: {in_blink_phase} (Total: {blink_count})"
+
+            
+                status_text = f"Frame: {frame_count+1} Area: {int(current_area)} State: {blink_state} (Total: {blink_count})"
+            
             cv2.putText(display_frame, status_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2); cv2.putText(display_frame, f"Max Area Ref: {int(max_observed_area)}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 0), 2)
             out_video.write(display_frame); progress_bar.progress((frame_count + 1) / total_frames, text=f"Analyzing... {frame_count+1}/{total_frames}")
+            
         cap.release(); out_video.release(); progress_bar.empty()
         df = pd.DataFrame(results_data)
         true_max_area = df[df['area'] > 0]['area'].max(); true_max_area = 0 if pd.isna(true_max_area) else true_max_area
@@ -173,11 +212,11 @@ def run_analysis(video_path, yolo_model, seg_model, config):
 # --- 5. Streamlit App Main Logic ---
 # ==============================================================================
 
-# 为每个用户会话生成一个唯一的、持久的ID
+
 if 'contributor_id' not in st.session_state:
     st.session_state.contributor_id = f"user_{str(uuid.uuid4())[:8]}"
 
-# 初始化知情同意状态
+
 if 'consent_given' not in st.session_state:
     st.session_state.consent_given = False
 
