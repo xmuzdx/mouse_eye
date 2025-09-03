@@ -31,8 +31,8 @@ except ImportError:
 
 # 3. 定义模型文件常量 (保持不变)
 # ... (此处省略)
-YOLO_MODEL_FILENAME = "YOLOv8.pt"
-SEG_MODEL_FILENAME = "HY-FPN.pth"
+YOLO_MODEL_FILENAME = "detection model.pt"
+SEG_MODEL_FILENAME = "segmentation model.pth"
 
 # 4. 所有辅助函数 (数据库, Google Sheets, AI模型等)
 # --- 数据库辅助函数 (保持不变) ---
