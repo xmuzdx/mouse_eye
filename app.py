@@ -1,4 +1,4 @@
-# app.py (最终版: 纯本地版本)
+# app.py (最终版: 纯本地版本 - 已修复 UnboundLocalError)
 
 import cv2
 import numpy as np
@@ -43,7 +43,7 @@ def save_results_to_db(filename, stats):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute('INSERT INTO analysis_results (analysis_timestamp, original_filename, total_blinks, blink_frequency_per_min, average_area, analysis_duration) VALUES (?, ?, ?, ?, ?, ?)', 
-              (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), filename, stats['total_blinks'], stats['blink_frequency_per_min'], stats['average_area'], stats['analysis_duration']))
+              (datetime.now().strftime("%Y-m-%d %H:%M:%S"), filename, stats['total_blinks'], stats['blink_frequency_per_min'], stats['average_area'], stats['analysis_duration']))
     conn.commit()
     conn.close()
 
@@ -105,6 +105,8 @@ def run_analysis(video_path, yolo_model, seg_model, config):
 
             if is_blurry:
                 results_data.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': -1, 'is_blinking': in_blink_phase, 'status': 'blurry'})
+                # ✅✅✅ 唯一的、关键的修复在这里 ✅✅✅
+                status_text = f"Frame: {frame_count+1} Status: BLURRY (Total: {blink_count})"
             else:
                 yolo_results = yolo_model.predict(frame, conf=config['YOLO_CONF_THRESHOLD'], classes=[0], verbose=False)
                 eye_box = yolo_results[0].boxes[0].xyxy[0].cpu().numpy().astype(int) if len(yolo_results) > 0 and len(yolo_results[0].boxes) > 0 else None
@@ -229,7 +231,7 @@ def show_main_app():
                     buf = BytesIO(); results_fig.savefig(buf, format="png")
                     st.download_button("📥 Download Plot", buf, "eye_area_plot.png", "image/png")
                     
-                    st.subheader("Detailed Frame-by-Frame Data"); st.dataframe(results_df)
+                    st.subheader("Detailed Frame-by-Frame Data"); st.dataframe(results_df, use_container_width=True)
                     csv = results_df.to_csv(index=False).encode('utf-8-sig')
                     st.download_button("📥 Download CSV Data", csv, "blink_analysis_results.csv", "text/csv")
         else:
