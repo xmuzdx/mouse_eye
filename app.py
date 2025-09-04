@@ -79,7 +79,6 @@ def postprocess_segmentation(output_mask, original_crop_shape, seg_threshold):
     binary_mask = (probabilities_resized > seg_threshold).astype(np.uint8) * 255; return binary_mask, np.sum(binary_mask == 255)
 def calculate_laplacian_variance(image): return cv2.Laplacian(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var()
 
-
 def run_analysis(video_path, yolo_model, seg_model, config):
     with tempfile.TemporaryDirectory() as temp_dir:
         output_video_path = os.path.join(temp_dir, 'processed_video.mp4')
@@ -103,8 +102,7 @@ def run_analysis(video_path, yolo_model, seg_model, config):
             
             in_blink_phase = (blink_state != 'OPEN')
 
-            if is_blurry:
-                results_data.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': -1, 'is_blinking': in_blink_phase, 'status': 'blurry'})
+            if is_blurry: results_data.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': -1, 'is_blinking': in_blink_phase, 'status': 'blurry'})
             else:
                 yolo_results = yolo_model.predict(frame, conf=config['YOLO_CONF_THRESHOLD'], classes=[0], verbose=False)
                 eye_box = yolo_results[0].boxes[0].xyxy[0].cpu().numpy().astype(int) if len(yolo_results) > 0 and len(yolo_results[0].boxes) > 0 else None
@@ -143,10 +141,8 @@ def run_analysis(video_path, yolo_model, seg_model, config):
                         
                         results_data.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': current_area, 'is_blinking': in_blink_phase, 'status': 'processed'})
                         cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    else:
-                        results_data.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': -1, 'is_blinking': in_blink_phase, 'status': 'processed_no_crop'})
-                else:
-                    results_data.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': -1, 'is_blinking': in_blink_phase, 'status': 'no_eye'})
+                    else: results_data.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': -1, 'is_blinking': in_blink_phase, 'status': 'processed_no_crop'})
+                else: results_data.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': -1, 'is_blinking': in_blink_phase, 'status': 'no_eye'})
 
                 status_text = f"Frame: {frame_count+1} Area: {int(current_area)} State: {blink_state} (Total: {blink_count})"
             
