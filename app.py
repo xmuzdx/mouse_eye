@@ -102,7 +102,10 @@ def run_analysis(video_path, yolo_model, seg_model, config):
             
             in_blink_phase = (blink_state != 'OPEN')
 
-            if is_blurry: results_data.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': -1, 'is_blinking': in_blink_phase, 'status': 'blurry'})
+            if is_blurry:
+                results_data.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': -1, 'is_blinking': in_blink_phase, 'status': 'blurry'})
+                # ✅ 修复：为模糊帧添加状态文本
+                status_text = f"Frame: {frame_count+1} Status: BLURRY (Total Blinks: {blink_count})"
             else:
                 yolo_results = yolo_model.predict(frame, conf=config['YOLO_CONF_THRESHOLD'], classes=[0], verbose=False)
                 eye_box = yolo_results[0].boxes[0].xyxy[0].cpu().numpy().astype(int) if len(yolo_results) > 0 and len(yolo_results[0].boxes) > 0 else None
@@ -141,8 +144,10 @@ def run_analysis(video_path, yolo_model, seg_model, config):
                         
                         results_data.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': current_area, 'is_blinking': in_blink_phase, 'status': 'processed'})
                         cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    else: results_data.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': -1, 'is_blinking': in_blink_phase, 'status': 'processed_no_crop'})
-                else: results_data.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': -1, 'is_blinking': in_blink_phase, 'status': 'no_eye'})
+                    else:
+                        results_data.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': -1, 'is_blinking': in_blink_phase, 'status': 'processed_no_crop'})
+                else:
+                    results_data.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': -1, 'is_blinking': in_blink_phase, 'status': 'no_eye'})
 
                 status_text = f"Frame: {frame_count+1} Area: {int(current_area)} State: {blink_state} (Total: {blink_count})"
             
