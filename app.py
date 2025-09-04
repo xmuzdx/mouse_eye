@@ -105,7 +105,7 @@ def run_analysis(video_path, yolo_model, seg_model, config):
 
             if is_blurry:
                 results_data.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': -1, 'is_blinking': in_blink_phase, 'status': 'blurry'})
-                # ✅✅✅ 唯一的、关键的修复在这里 ✅✅✅
+                
                 status_text = f"Frame: {frame_count+1} Status: BLURRY (Total: {blink_count})"
             else:
                 yolo_results = yolo_model.predict(frame, conf=config['YOLO_CONF_THRESHOLD'], classes=[0], verbose=False)
@@ -162,7 +162,7 @@ def run_analysis(video_path, yolo_model, seg_model, config):
         df.loc[:, 'normalized_area'] = df['area'].apply(lambda x: x / true_max_area if x >= 0 else -1)
         valid_frames = df[(df['status'] == 'processed') & (df['area'] >= 0)]; total_time_seconds = valid_frames['timestamp'].max() - valid_frames['timestamp'].min() if not valid_frames.empty else 0
         blink_frequency_hz = blink_count / total_time_seconds if total_time_seconds > 0 else 0
-        stats = {'total_blinks': blink_count, 'analysis_duration': total_time_seconds, 'blink_frequency_hz': blink_frequency_hz, 'blink_frequency_per_min': blink_frequency_hz * 60, 'average_area': average_area}
+        stats = {'total_blinks': blink_count, 'analysis_duration': total_time_seconds, 'blink_frequency_hz': blink_frequency_hz, 'blink_frequency_per_min': blink_frequency_hz * 60, 'average_area': average_area/true_max_area}
         fig, ax = plt.subplots(figsize=(12, 6)); plot_data = df[df['normalized_area'] >= 0]
         if not plot_data.empty:
             ax.plot(plot_data['timestamp'], plot_data['normalized_area'], label='Normalized Eye Fissure Area')
@@ -221,7 +221,7 @@ def show_main_app():
                     col1, col2, col3, col4 = st.columns(4)
                     col1.metric("Total Blinks", f"{stats['total_blinks']}")
                     col2.metric("Blink Rate (per min)", f"{stats['blink_frequency_per_min']:.2f}")
-                    col3.metric("Average Fissure Area", f"{stats['average_area']:.2f} px")
+                    col3.metric("Normalized area", f"{stats['average_area']:.2f} px")
                     col4.metric("Analyzed Duration", f"{stats['analysis_duration']:.2f} s")
                     
                     st.subheader("Processed Video"); st.video(video_bytes)
