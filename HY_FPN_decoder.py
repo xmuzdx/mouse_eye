@@ -8,39 +8,60 @@ import torch
 from torch import nn
 from torch.nn import init
 
-# 定义ECA注意力模块的类
 class ECAAttention(nn.Module):
+    """
+    Constructs an ECA module.
+    
+    This is the "complete" version of ECA, which implements the adaptive kernel size
+    calculation as described in the original paper.
+    """
+    def __init__(self, in_channels: int, gamma: int = 2, b: int = 1):
+        """
+        Args:
+            in_channels (int): Number of input channels.
+            gamma (int): Parameter to control the mapping relationship between
+                         channel number C and kernel size k.
+            b (int): Bias parameter for the kernel size calculation.
+        """
+        super(ECAAttention, self).__init__()
 
-    def __init__(self, in_channels, kernel_size=3):
-        super().__init__()
-        self.gap = nn.AdaptiveAvgPool2d(1)  # 定义全局平均池化层，将空间维度压缩为1x1
-        # 定义一个1D卷积，用于处理通道间的关系，核大小可调，padding保证输出通道数不变
-        self.conv = nn.Conv1d(1, 1, kernel_size=kernel_size, padding=(kernel_size - 1) // 2)
-        self.sigmoid = nn.Sigmoid()  # Sigmoid函数，用于激活最终的注意力权重
+        # --- 核心：自适应计算 kernel_size ---
+        # 根据论文中的公式计算 t
+        t = int(abs((math.log(in_channels, 2) + b) / gamma))
+        # 确保 kernel_size (k) 是一个奇数
+        k_size = t if t % 2 else t + 1
+        
+        # 打印出计算出的kernel_size，方便调试和观察
+        # print(f"ECA for {in_channels} channels -> kernel_size = {k_size}")
 
-    # 权重初始化方法
-    def init_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                init.kaiming_normal_(m.weight, mode='fan_out')  # 对Conv2d层使用Kaiming初始化
-                if m.bias is not None:
-                    init.constant_(m.bias, 0)  # 如果有偏置项，则初始化为0
-            elif isinstance(m, nn.BatchNorm2d):
-                init.constant_(m.weight, 1)  # 批归一化层权重初始化为1
-                init.constant_(m.bias, 0)  # 批归一化层偏置初始化为0
-            elif isinstance(m, nn.Linear):
-                init.normal_(m.weight, std=0.001)  # 全连接层权重使用正态分布初始化
-                if m.bias is not None:
-                    init.constant_(m.bias, 0)  # 全连接层偏置初始化为0
+        # 定义模块
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.conv = nn.Conv1d(1, 1, kernel_size=k_size, padding=(k_size - 1) // 2, bias=False)
+        self.sigmoid = nn.Sigmoid()
 
-    # 前向传播方法
-    def forward(self, x):
-        y = self.gap(x)  # 对输入x应用全局平均池化，得到bs,c,1,1维度的输出
-        y = y.squeeze(-1).permute(0, 2, 1)  # 移除最后一个维度并转置，为1D卷积准备，变为bs,1,c
-        y = self.conv(y)  # 对转置后的y应用1D卷积，得到bs,1,c维度的输出
-        y = self.sigmoid(y)  # 应用Sigmoid函数激活，得到最终的注意力权重
-        y = y.permute(0, 2, 1).unsqueeze(-1)  # 再次转置并增加一个维度，以匹配原始输入x的维度
-        return x * y.expand_as(x)  # 将注意力权重应用到原始输入x上，通过广播机制扩展维度并执行逐元素乘法
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # 获取输入张量的形状
+        batch_size, num_channels, height, width = x.size()
+        
+        # 1. 全局平均池化: [B, C, H, W] -> [B, C, 1, 1]
+        y = self.avg_pool(x)
+        
+        # 2. 变形以适应1D卷积:
+        # [B, C, 1, 1] -> [B, C, 1] -> [B, 1, C]
+        y = y.squeeze(-1).transpose(-1, -2)
+        
+        # 3. 1D卷积，捕捉局部跨通道交互
+        y = self.conv(y)
+        
+        # 4. 变形以匹配原始张量:
+        # [B, 1, C] -> [B, C, 1] -> [B, C, 1, 1]
+        y = y.transpose(-1, -2).unsqueeze(-1)
+        
+        # 5. Sigmoid激活，得到注意力权重
+        y = self.sigmoid(y)
+        
+        # 6. 将注意力权重应用到原始输入x上
+        return x * y.expand_as(x)
 class Conv3x3GNReLU(nn.Module):
     def __init__(self, in_channels: int, out_channels: int, upsample: bool = False):
         super().__init__()
