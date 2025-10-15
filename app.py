@@ -14,7 +14,7 @@ import tempfile
 from io import BytesIO
 import sqlite3
 from datetime import datetime
-
+import math
 st.set_page_config(layout="wide", page_title="Mouse Blink Analysis Platform")
 
 
