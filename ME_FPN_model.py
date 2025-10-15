@@ -8,7 +8,7 @@ from segmentation_models_pytorch.base import (
 from segmentation_models_pytorch.encoders import get_encoder
 from segmentation_models_pytorch.base.hub_mixin import supports_config_loading
 
-from HY_FPN_decoder import FPNDecoder
+from ME_FPN_decoder import FPNDecoder
 
 
 class FPN(SegmentationModel):

@@ -1,4 +1,4 @@
-# app.py (最终版: 纯本地版本 - 已修复 UnboundLocalError)
+# app.py (最终版: 纯本地版本 - 已整合新分析逻辑)
 
 import cv2
 import numpy as np
@@ -19,9 +19,9 @@ st.set_page_config(layout="wide", page_title="Mouse Blink Analysis Platform")
 
 
 try:
-    from HY_FPN_model import FPN as MyCustomFPN
+    from ME_FPN_model import FPN as MyCustomFPN
 except ImportError:
-    st.error("ERROR: Could not import your custom model. Please ensure `HY_FPN_model.py` and `HY_FPN_decoder.py` exist.")
+    st.error("ERROR: Could not import your custom model. Please ensure `ME_FPN_model.py` and `ME_FPN_decoder.py` exist.")
     class MyCustomFPN: pass
 
 
@@ -33,8 +33,18 @@ DB_FILE = "analysis_history.db"
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
+    # [数据库更新] 增加了新指标的列，并更新了列名以匹配新函数
     c.execute('''
-        CREATE TABLE IF NOT EXISTS analysis_results (id INTEGER PRIMARY KEY AUTOINCREMENT, analysis_timestamp TEXT NOT NULL, original_filename TEXT NOT NULL, total_blinks INTEGER, blink_frequency_per_min REAL, average_area REAL, analysis_duration REAL)
+        CREATE TABLE IF NOT EXISTS analysis_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, 
+            analysis_timestamp TEXT NOT NULL, 
+            original_filename TEXT NOT NULL, 
+            total_blinks INTEGER, 
+            blink_frequency_per_min REAL, 
+            average_normalized_area REAL, 
+            avg_local_min_normalized_area REAL,
+            analysis_duration_s REAL
+        )
     ''')
     conn.commit()
     conn.close()
@@ -42,8 +52,21 @@ def init_db():
 def save_results_to_db(filename, stats):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute('INSERT INTO analysis_results (analysis_timestamp, original_filename, total_blinks, blink_frequency_per_min, average_area, analysis_duration) VALUES (?, ?, ?, ?, ?, ?)', 
-              (datetime.now().strftime("%Y-m-%d %H:%M:%S"), filename, stats['total_blinks'], stats['blink_frequency_per_min'], stats['average_area'], stats['analysis_duration']))
+    # [数据库更新] 更新了INSERT语句以匹配新的表结构和stats字典
+    c.execute('''
+        INSERT INTO analysis_results (
+            analysis_timestamp, original_filename, total_blinks, 
+            blink_frequency_per_min, average_normalized_area, avg_local_min_normalized_area, analysis_duration_s
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
+        filename, 
+        stats['total_blinks'], 
+        stats['blink_frequency_per_min'], 
+        stats.get('average_normalized_area'),
+        stats.get('avg_local_min_normalized_area'),
+        stats['analysis_duration_s']
+    ))
     conn.commit()
     conn.close()
 
@@ -76,97 +99,157 @@ def preprocess_for_segmentation(eye_crop, input_size=(256, 256)):
 def postprocess_segmentation(output_mask, original_crop_shape, seg_threshold):
     mask_numpy = output_mask.squeeze().cpu().detach().numpy(); probabilities = 1 / (1 + np.exp(-mask_numpy))
     probabilities_resized = cv2.resize(probabilities, (original_crop_shape[1], original_crop_shape[0]), interpolation=cv2.INTER_LINEAR)
-    binary_mask = (probabilities_resized > seg_threshold).astype(np.uint8) * 255; return binary_mask, np.sum(binary_mask == 255)
+    binary_mask = (probabilities_resized > seg_threshold).astype(np.uint8); return binary_mask, np.sum(binary_mask)
 def calculate_laplacian_variance(image): return cv2.Laplacian(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var()
 
 
+
 def run_analysis(video_path, yolo_model, seg_model, config):
+    """
+    Analyzes a single video file to detect and quantify mouse blinks.
+    """
     with tempfile.TemporaryDirectory() as temp_dir:
         output_video_path = os.path.join(temp_dir, 'processed_video.mp4')
         cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened(): st.error("Error: Could not open the uploaded video file."); return None, None, None, None
+        if not cap.isOpened():
+            st.error("Error: Could not open the uploaded video file.")
+            return None, None, None, None
+            
         frame_width, frame_height, fps, total_frames = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)), cap.get(cv2.CAP_PROP_FPS), int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         out_video = cv2.VideoWriter(output_video_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (frame_width, frame_height))
         
-        results_data = []
+        frame_data_list = []
         max_observed_area = 0
-        blink_count = 0
         previous_area = -1
-        blink_state = 'OPEN'
-        
+
+        # --- 原始眨眼逻辑所需变量 ---
+        blink_count = 0
+        blink_state = 'OPEN' 
+        blink_minima_areas = []
+        current_blink_minimum = float('inf')
+
+        # --- 新增：用于寻找所有局部最小值的变量 ---
+        local_minima_areas = []
+        dip_state = 'IDLE'
+        current_dip_minimum = float('inf')
+
         progress_bar = st.progress(0, text="Analyzing video...")
         for frame_count in range(total_frames):
             ret, frame = cap.read()
             if not ret: break
-            timestamp = (frame_count + 1) / fps; display_frame = frame.copy()
+            
+            timestamp = (frame_count + 1) / fps
+            display_frame = frame.copy()
             is_blurry = calculate_laplacian_variance(frame) < config['LAPLACIAN_VAR_THRESHOLD']
             
-            in_blink_phase = (blink_state != 'OPEN')
+            status_text = ""
+            current_area_for_display = 0
 
             if is_blurry:
-                results_data.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': -1, 'is_blinking': in_blink_phase, 'status': 'blurry'})
-                
-                status_text = f"Frame: {frame_count+1} Status: BLURRY (Total: {blink_count})"
+                frame_data_list.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': -1, 'status': 'blurry'})
+                status_text = f"Frame: {frame_count+1} Status: BLURRY"
             else:
                 yolo_results = yolo_model.predict(frame, conf=config['YOLO_CONF_THRESHOLD'], classes=[0], verbose=False)
                 eye_box = yolo_results[0].boxes[0].xyxy[0].cpu().numpy().astype(int) if len(yolo_results) > 0 and len(yolo_results[0].boxes) > 0 else None
+                
                 current_area = 0
+                status = 'no_eye'
                 if eye_box is not None:
-                    x1, y1, x2, y2 = eye_box; eye_crop = frame[y1:y2, x1:x2]
+                    x1, y1, x2, y2 = eye_box
+                    eye_crop = frame[y1:y2, x1:x2]
                     if eye_crop.size > 0:
                         input_tensor = preprocess_for_segmentation(eye_crop)
                         with torch.no_grad(): seg_output = seg_model(input_tensor)
                         binary_mask, current_area = postprocess_segmentation(seg_output, eye_crop.shape[:2], config['SEG_THRESHOLD'])
-                        
-                        if current_area > config['MIN_OPEN_AREA_FOR_REF']: max_observed_area = max(max_observed_area, current_area)
-                        
+                        status = 'processed'
+
+                        if current_area > config['MIN_OPEN_AREA_FOR_REF']:
+                            max_observed_area = max(max_observed_area, current_area)
+
                         if previous_area != -1 and max_observed_area > config['MIN_OPEN_AREA_FOR_REF']:
                             area_drop = previous_area - current_area
                             area_rise = current_area - previous_area 
-                        
+                            
+                            # --- 原始的、严格的眨眼判断逻辑 ---
                             if blink_state == 'OPEN':
-                                if area_drop > config['BLINK_DROP_THRESHOLD']: blink_state = 'CLOSING'
+                                if area_drop > config['BLINK_DROP_THRESHOLD']:
+                                    blink_state = 'CLOSING'; current_blink_minimum = previous_area
                             elif blink_state == 'CLOSING':
-                                if max_observed_area > 0 and current_area < (max_observed_area * config['BLINK_CONFIRM_RATIO']): blink_state = 'CLOSED_CONFIRMED'
-                                elif area_rise > 0: blink_state = 'OPEN'
+                                current_blink_minimum = min(current_blink_minimum, current_area)
+                                if current_area < (max_observed_area * config['BLINK_CONFIRM_RATIO']):
+                                    blink_state = 'CLOSED_CONFIRMED'
+                                elif area_rise > 0:
+                                    blink_state = 'OPEN'
                             elif blink_state == 'CLOSED_CONFIRMED':
+                                current_blink_minimum = min(current_blink_minimum, current_area)
                                 if area_rise > 0:
-                                    blink_count += 1
+                                    blink_count += 1; blink_minima_areas.append(current_blink_minimum)
                                     blink_state = 'OPENING'
                             elif blink_state == 'OPENING':
-                                if current_area > (max_observed_area * config['REOPEN_RATIO_THRESHOLD']): blink_state = 'OPEN'
+                                if current_area > (max_observed_area * config['REOPEN_RATIO_THRESHOLD']):
+                                    blink_state = 'OPEN'
+                            
+                            # --- 新增：独立的局部最小值寻找逻辑 ---
+                            if dip_state == 'IDLE':
+                                if area_drop > config['DIP_THRESHOLD']:
+                                    dip_state = 'DIPPING'; current_dip_minimum = current_area
+                            elif dip_state == 'DIPPING':
+                                current_dip_minimum = min(current_dip_minimum, current_area)
+                                if area_rise > 0:
+                                    local_minima_areas.append(current_dip_minimum); dip_state = 'IDLE'
                         
                         previous_area = current_area
-                        in_blink_phase = (blink_state != 'OPEN')
+                        current_area_for_display = current_area
 
                         if current_area > 0:
-                            colored_mask = cv2.cvtColor(binary_mask, cv2.COLOR_GRAY2BGR); colored_mask[binary_mask == 255] = (255, 0, 255)
+                            colored_mask = cv2.cvtColor(binary_mask * 255, cv2.COLOR_GRAY2BGR)
+                            colored_mask[binary_mask == 1] = (255, 0, 255)
                             display_frame[y1:y2, x1:x2] = cv2.addWeighted(eye_crop, 0.7, colored_mask, 0.3, 0)
                         
-                        results_data.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': current_area, 'is_blinking': in_blink_phase, 'status': 'processed'})
                         cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    else:
-                        results_data.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': -1, 'is_blinking': in_blink_phase, 'status': 'processed_no_crop'})
-                else:
-                    results_data.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': -1, 'is_blinking': in_blink_phase, 'status': 'no_eye'})
-
-                status_text = f"Frame: {frame_count+1} Area: {int(current_area)} State: {blink_state} (Total: {blink_count})"
+                    else: status = 'processed_no_crop'
+                frame_data_list.append({'frame': frame_count + 1, 'timestamp': timestamp, 'area': current_area, 'status': status})
+                status_text = f"Frame: {frame_count+1} Area: {int(current_area_for_display)} State: {blink_state} (Total: {blink_count})"
             
-            cv2.putText(display_frame, status_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2); cv2.putText(display_frame, f"Max Area Ref: {int(max_observed_area)}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 0), 2)
-            out_video.write(display_frame); progress_bar.progress((frame_count + 1) / total_frames, text=f"Analyzing... {frame_count+1}/{total_frames}")
+            cv2.putText(display_frame, status_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            cv2.putText(display_frame, f"Max Area Ref: {int(max_observed_area)}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 0), 2)
+            out_video.write(display_frame)
+            progress_bar.progress((frame_count + 1) / total_frames, text=f"Analyzing... {frame_count+1}/{total_frames}")
             
         cap.release(); out_video.release(); progress_bar.empty()
-        df = pd.DataFrame(results_data)
-        true_max_area = df[df['area'] > 0]['area'].max(); true_max_area = 1 if pd.isna(true_max_area) or true_max_area == 0 else true_max_area
-        processed_frames_df = df[df['status'] == 'processed']; average_area = processed_frames_df['area'].mean() if not processed_frames_df.empty and processed_frames_df['area'].sum() > 0 else 0
-        df.loc[:, 'normalized_area'] = df['area'].apply(lambda x: x / true_max_area if x >= 0 else -1)
-        valid_frames = df[(df['status'] == 'processed') & (df['area'] >= 0)]; total_time_seconds = valid_frames['timestamp'].max() - valid_frames['timestamp'].min() if not valid_frames.empty else 0
+        
+        if not frame_data_list: return None, None, None, None
+        df = pd.DataFrame(frame_data_list)
+        analyzable_frames = df[df['status'] != 'blurry']
+        if analyzable_frames.empty: return None, None, None, None
+
+        positive_areas = analyzable_frames[analyzable_frames['area'] > 0]['area']
+        true_max_area = positive_areas.quantile(0.995) if not positive_areas.empty else 1
+        if pd.isna(true_max_area) or true_max_area == 0: true_max_area = 1
+        
+        df['normalized_area'] = df['area'].apply(lambda x: x / true_max_area if x >= 0 else -1)
+        average_area = analyzable_frames['area'].clip(lower=0).mean()
+        average_normalized_area = average_area / true_max_area
+        total_time_seconds = analyzable_frames['timestamp'].max() - analyzable_frames['timestamp'].min()
         blink_frequency_hz = blink_count / total_time_seconds if total_time_seconds > 0 else 0
-        stats = {'total_blinks': blink_count, 'analysis_duration': total_time_seconds, 'blink_frequency_hz': blink_frequency_hz, 'blink_frequency_per_min': blink_frequency_hz * 60, 'average_area': average_area/true_max_area}
-        fig, ax = plt.subplots(figsize=(12, 6)); plot_data = df[df['normalized_area'] >= 0]
+        
+        average_local_minimum_area = np.mean(local_minima_areas) if local_minima_areas else np.nan
+        normalized_average_local_minimum = average_local_minimum_area / true_max_area if true_max_area > 0 and not pd.isna(average_local_minimum_area) else np.nan
+
+        stats = {
+            'total_blinks': blink_count, 
+            'analysis_duration_s': total_time_seconds,
+            'blink_frequency_per_min': blink_frequency_hz * 60,
+            'average_normalized_area': average_normalized_area,
+            'avg_local_min_normalized_area': normalized_average_local_minimum
+        }
+
+        fig, ax = plt.subplots(figsize=(12, 6))
+        plot_data = df[df['normalized_area'] >= 0]
         if not plot_data.empty:
             ax.plot(plot_data['timestamp'], plot_data['normalized_area'], label='Normalized Eye Fissure Area')
             ax.set_xlabel('Time (s)'); ax.set_ylabel('Normalized Area (relative to max)'); ax.set_title('Normalized Eye Fissure Area Over Time'); ax.set_ylim(bottom=-0.05, top=1.1); ax.legend(); ax.grid(True)
+        
         with open(output_video_path, 'rb') as f: video_bytes = f.read()
         return video_bytes, df, fig, stats
 
@@ -207,6 +290,7 @@ def show_main_app():
                     'LAPLACIAN_VAR_THRESHOLD': laplacian_var_threshold, 'BLINK_DROP_THRESHOLD': blink_drop_threshold,
                     'REOPEN_RATIO_THRESHOLD': reopen_ratio_threshold, 'BLINK_CONFIRM_RATIO': blink_confirm_ratio,
                     'MIN_OPEN_AREA_FOR_REF': 100,
+                    'DIP_THRESHOLD': 50, # [新参数] 为局部下降检测逻辑添加固定的默认值
                 }
                 video_bytes, results_df, results_fig, stats = run_analysis(video_path, yolo_model, seg_model, config)
                 os.remove(video_path)
@@ -217,12 +301,26 @@ def show_main_app():
                     except Exception as e:
                         st.warning(f"Could not save results to local history: {e}")
                     
+                    # ==============================================================================
+                    # === [核心改动] 以下是替换后的、显示新指标的结果展示区 ===
+                    # ==============================================================================
                     st.header("📊 Analysis Results")
-                    col1, col2, col3, col4 = st.columns(4)
+                    # 将布局从4列改为5列以容纳新指标
+                    col1, col2, col3, col4, col5 = st.columns(5)
+                    
+                    # 更新指标以匹配新函数返回的键名，并添加新指标
                     col1.metric("Total Blinks", f"{stats['total_blinks']}")
                     col2.metric("Blink Rate (per min)", f"{stats['blink_frequency_per_min']:.2f}")
-                    col3.metric("Normalized area", f"{stats['average_area']:.2f} px")
-                    col4.metric("Analyzed Duration", f"{stats['analysis_duration']:.2f} s")
+                    col3.metric("Avg Norm. Area", f"{stats['average_normalized_area']:.4f}", help="Average eye openness, normalized to max area.")
+                    col4.metric("Analyzed Duration", f"{stats['analysis_duration_s']:.2f} s")
+                    
+                    # 添加新的指标
+                    avg_dip_value = stats.get('avg_local_min_normalized_area')
+                    col5.metric(
+                        "Avg Dip Closure", 
+                        f"{avg_dip_value:.4f}" if avg_dip_value is not None and not np.isnan(avg_dip_value) else "N/A",
+                        help="Average depth of all minor/major eye closures (dips). Lower is deeper."
+                    )
                     
                     st.subheader("Processed Video"); st.video(video_bytes)
                     st.download_button("📥 Download Processed Video", video_bytes, "processed_video.mp4", "video/mp4")
