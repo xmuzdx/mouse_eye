@@ -315,7 +315,7 @@ def show_main_app():
             if yolo_model and seg_model:
                 config = {
                     'YOLO_CONF_THRESHOLD': 0.6, 'SEG_THRESHOLD': 0.5,
-                    'LAPLACIAN_VAR_THRESHOLD': 0, 'BLINK_DROP_THRESHOLD': blink_confirm_ratio,
+                    'LAPLACIAN_VAR_THRESHOLD': 0, 'BLINK_DROP_THRESHOLD': blink_trigger_ratio,
                     'REOPEN_RATIO_THRESHOLD': 0.4, 'BLINK_CONFIRM_RATIO': blink_confirm_ratio,
                     'MIN_OPEN_AREA_FOR_REF': 100,
                     'DIP_THRESHOLD': 50,
