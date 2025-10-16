@@ -85,14 +85,14 @@ def load_results_from_db():
 @st.cache_resource
 def load_detection_model(path):
     if not os.path.exists(path): 
-        st.error(f"YOLOv8 model file not found: {path}")
+        st.error(f" model file not found: {path}")
         return None
     try: 
         model = YOLO(path)
-        st.success(f"YOLOv8 detection model loaded successfully: {path}")
+        st.success(f" detection model loaded successfully: {path}")
         return model
     except Exception as e: 
-        st.error(f"Error loading YOLOv8 model: {e}")
+        st.error(f"Error loading  model: {e}")
         return None
 
 @st.cache_resource
@@ -107,7 +107,7 @@ def load_segmentation_model(path):
         model.load_state_dict(torch.load(path, map_location=DEVICE))
         model.to(DEVICE)
         model.eval()
-        st.success(f"Custom FPN (resnet34) segmentation model loaded.")
+        st.success(f" segmentation model loaded.")
         return model
     except Exception as e: 
         st.error(f"Error loading custom FPN model: {e}")
