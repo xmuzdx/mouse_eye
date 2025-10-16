@@ -279,16 +279,15 @@ def show_main_app():
         if uploaded_file is not None:
              st.session_state.analysis_results = None
 
-        st.subheader("2. General Thresholds")
+        
         #yolo_conf_threshold = st.slider("YOLO Confidence Threshold", 0.0, 1.0, 0.6, 0.05)
         #seg_threshold = st.slider("Segmentation Threshold", 0.0, 1.0, 0.5, 0.01)
-        laplacian_var_threshold = st.number_input("Blur Detection Threshold (Laplacian)", min_value=0, value=0)
+        #laplacian_var_threshold = st.number_input("Blur Detection Threshold (Laplacian)", min_value=0, value=0)
         st.markdown("---")
-        st.subheader("3. Blink Detection Logic")
-        st.subheader("3. Blink Detection Logic")
+        st.subheader("2. Blink Detection Logic")
         blink_trigger_ratio = st.slider(
             "Blink Trigger (Drop Ratio)", 
-            min_value=0.0, max_value=1.0, value=0.3, step=0.05, 
+            min_value=0.0, max_value=1.0, value=0.01, step=0.01, 
             help="A blink starts when the area drops by this ratio relative to the max observed area. (e.g., 0.3 means a 30% drop from the previous frame triggers detection)."
         )
         blink_confirm_ratio = st.slider(
@@ -316,7 +315,7 @@ def show_main_app():
             if yolo_model and seg_model:
                 config = {
                     'YOLO_CONF_THRESHOLD': 0.6, 'SEG_THRESHOLD': 0.5,
-                    'LAPLACIAN_VAR_THRESHOLD': laplacian_var_threshold, 'BLINK_DROP_THRESHOLD': blink_confirm_ratio,
+                    'LAPLACIAN_VAR_THRESHOLD': 0, 'BLINK_DROP_THRESHOLD': blink_confirm_ratio,
                     'REOPEN_RATIO_THRESHOLD': 0.4, 'BLINK_CONFIRM_RATIO': blink_confirm_ratio,
                     'MIN_OPEN_AREA_FOR_REF': 100,
                     'DIP_THRESHOLD': 50,
