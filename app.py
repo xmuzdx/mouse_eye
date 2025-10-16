@@ -193,7 +193,7 @@ def run_analysis(video_path, yolo_model, seg_model, config):
                             area_drop = previous_area - current_area
                             area_rise = current_area - previous_area 
                             if blink_state == 'OPEN':
-                                if area_drop > config['BLINK_DROP_THRESHOLD']: blink_state = 'CLOSING'; current_blink_minimum = previous_area
+                                if max_observed_area > 0 and (area_drop / max_observed_area) > config['BLINK_TRIGGER_RATIO']: blink_state = 'CLOSING'; current_blink_minimum = previous_area
                             elif blink_state == 'CLOSING':
                                 current_blink_minimum = min(current_blink_minimum, current_area)
                                 if current_area < (max_observed_area * config['BLINK_CONFIRM_RATIO']): blink_state = 'CLOSED_CONFIRMED'
@@ -285,9 +285,18 @@ def show_main_app():
         laplacian_var_threshold = st.number_input("Blur Detection Threshold (Laplacian)", min_value=0, value=0)
         st.markdown("---")
         st.subheader("3. Blink Detection Logic")
-        blink_drop_threshold = st.number_input("Blink Trigger (Area Drop)", min_value=50, value=200, step=10, help="Area decrease required to start a blink detection.")
-        blink_confirm_ratio = st.slider("Blink Confirm (Closure Ratio)", 0.0, 1.0, 0.25, 0.05, help="Area must drop below this ratio of max area to be a confirmed blink.")
-        reopen_ratio_threshold = st.slider("Blink Reset (Re-open Ratio)", 0.0, 1.0, 0.4, 0.05, help="Eye must re-open to this ratio of max area to reset the detector.")
+        st.subheader("3. Blink Detection Logic")
+        blink_trigger_ratio = st.slider(
+            "Blink Trigger (Drop Ratio)", 
+            min_value=0.0, max_value=1.0, value=0.3, step=0.05, 
+            help="A blink starts when the area drops by this ratio relative to the max observed area. (e.g., 0.3 means a 30% drop from the previous frame triggers detection)."
+        )
+        blink_confirm_ratio = st.slider(
+            "Blink Confirm (Closure Depth Ratio)", 
+            min_value=0.0, max_value=1.0, value=0.25, step=0.05, 
+            help="To be a valid blink, the eye must close until its area is LESS THAN this ratio of the max area. (e.g., 0.25 means the eye must be >75% closed)."
+        )
+        #reopen_ratio_threshold = st.slider("Blink Reset (Re-open Ratio)", 0.0, 1.0, 0.4, 0.05, help="Eye must re-open to this ratio of max area to reset the detector.")
         st.markdown("---")
         start_button = st.button("🚀 Start Analysis", disabled=(uploaded_file is None), type="primary")
 
@@ -307,8 +316,8 @@ def show_main_app():
             if yolo_model and seg_model:
                 config = {
                     'YOLO_CONF_THRESHOLD': 0.6, 'SEG_THRESHOLD': 0.5,
-                    'LAPLACIAN_VAR_THRESHOLD': laplacian_var_threshold, 'BLINK_DROP_THRESHOLD': blink_drop_threshold,
-                    'REOPEN_RATIO_THRESHOLD': reopen_ratio_threshold, 'BLINK_CONFIRM_RATIO': blink_confirm_ratio,
+                    'LAPLACIAN_VAR_THRESHOLD': laplacian_var_threshold, 'BLINK_DROP_THRESHOLD': blink_confirm_ratio,
+                    'REOPEN_RATIO_THRESHOLD': 0.4, 'BLINK_CONFIRM_RATIO': blink_confirm_ratio,
                     'MIN_OPEN_AREA_FOR_REF': 100,
                     'DIP_THRESHOLD': 50,
                 }
