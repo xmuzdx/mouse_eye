@@ -280,8 +280,8 @@ def show_main_app():
              st.session_state.analysis_results = None
 
         st.subheader("2. General Thresholds")
-        yolo_conf_threshold = st.slider("YOLO Confidence Threshold", 0.0, 1.0, 0.6, 0.05)
-        seg_threshold = st.slider("Segmentation Threshold", 0.0, 1.0, 0.5, 0.01)
+        #yolo_conf_threshold = st.slider("YOLO Confidence Threshold", 0.0, 1.0, 0.6, 0.05)
+        #seg_threshold = st.slider("Segmentation Threshold", 0.0, 1.0, 0.5, 0.01)
         laplacian_var_threshold = st.number_input("Blur Detection Threshold (Laplacian)", min_value=0, value=0)
         st.markdown("---")
         st.subheader("3. Blink Detection Logic")
@@ -306,7 +306,7 @@ def show_main_app():
             
             if yolo_model and seg_model:
                 config = {
-                    'YOLO_CONF_THRESHOLD': yolo_conf_threshold, 'SEG_THRESHOLD': seg_threshold,
+                    'YOLO_CONF_THRESHOLD': 0.6, 'SEG_THRESHOLD': 0.5,
                     'LAPLACIAN_VAR_THRESHOLD': laplacian_var_threshold, 'BLINK_DROP_THRESHOLD': blink_drop_threshold,
                     'REOPEN_RATIO_THRESHOLD': reopen_ratio_threshold, 'BLINK_CONFIRM_RATIO': blink_confirm_ratio,
                     'MIN_OPEN_AREA_FOR_REF': 100,
