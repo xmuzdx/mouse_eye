@@ -89,7 +89,7 @@ def load_detection_model(path):
         return None
     try: 
         model = YOLO(path)
-        st.success(f" detection model loaded successfully: {path}")
+        st.success(f" Detection model loaded successfully: {path}")
         return model
     except Exception as e: 
         st.error(f"Error loading  model: {e}")
@@ -107,7 +107,7 @@ def load_segmentation_model(path):
         model.load_state_dict(torch.load(path, map_location=DEVICE))
         model.to(DEVICE)
         model.eval()
-        st.success(f" segmentation model loaded.")
+        st.success(f" Segmentation model loaded.")
         return model
     except Exception as e: 
         st.error(f"Error loading custom FPN model: {e}")
