@@ -249,7 +249,8 @@ def run_analysis(video_path, yolo_model, seg_model, config):
         }
 
         fig, ax = plt.subplots(figsize=(12, 6))
-        plot_data = df[df['normalized_area'] >= 0]
+        
+        plot_data = df[df['status'] == 'processed'] 
         if not plot_data.empty:
             ax.plot(plot_data['timestamp'], plot_data['normalized_area'], label='Normalized Eye Fissure Area')
             ax.set_xlabel('Time (s)'); ax.set_ylabel('Normalized Area (relative to max)'); ax.set_title('Normalized Eye Fissure Area Over Time')
