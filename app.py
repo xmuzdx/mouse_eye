@@ -282,7 +282,7 @@ def show_main_app():
         st.subheader("2. General Thresholds")
         yolo_conf_threshold = st.slider("YOLO Confidence Threshold", 0.0, 1.0, 0.6, 0.05)
         seg_threshold = st.slider("Segmentation Threshold", 0.0, 1.0, 0.5, 0.01)
-        laplacian_var_threshold = st.number_input("Blur Detection Threshold (Laplacian)", min_value=0, value=15)
+        laplacian_var_threshold = st.number_input("Blur Detection Threshold (Laplacian)", min_value=0, value=0)
         st.markdown("---")
         st.subheader("3. Blink Detection Logic")
         blink_drop_threshold = st.number_input("Blink Trigger (Area Drop)", min_value=50, value=200, step=10, help="Area decrease required to start a blink detection.")
